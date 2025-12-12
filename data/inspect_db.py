@@ -1,5 +1,9 @@
 import sqlite3
 import pandas as pd
+import matplotlib
+
+matplotlib.use("Qt5Agg")
+
 import matplotlib.pyplot as plt
 
 # Config
@@ -82,4 +86,4 @@ if __name__ == "__main__":
     view_ticker_data("IBM", limit=50)
 
     # 3. Plot chart (uncomment to run)
-    # plot_ticker("AAPL")
+    plot_ticker("AAPL")
