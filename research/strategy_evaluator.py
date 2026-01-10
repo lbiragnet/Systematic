@@ -4,7 +4,7 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Patch
-from typing import List, Callable, Tuple
+from typing import List, Callable, Tuple, Union
 from joblib import Parallel, delayed
 import warnings
 
@@ -320,11 +320,39 @@ def walkforward_optimization(
     train_years: int = 4,
     test_months: int = 3,
     cost_bps: float = 0.001,
-):
+    enable_benchmark: bool = True,  # Toggle this to True/False
+    benchmark_ticker: str = "SPY",
+    lookback_buffer: int = 200,  # Keeps the "Cold Start" fix
+) -> Union[pd.Series, Tuple[pd.Series, pd.Series]]:
+    """
+    Unified Walk-Forward Optimization Engine.
+    - Handles standard WFA.
+    - Handles Benchmarking.
+    - Handles Lookback/Warmup buffering.
+    - Generates timeline visualization.
+    """
+
+    # 1. OPTIONAL: Fetch Benchmark
+    bench_ret = pd.Series()
+    if enable_benchmark:
+        bench_df = fetch_historical_data(
+            benchmark_ticker,
+            start_date=returns.index[0].strftime("%Y-%m-%d"),
+            end_date=returns.index[-1].strftime("%Y-%m-%d"),
+        )
+        if not bench_df.empty:
+            bench_ret = np.log(bench_df["Close"] / bench_df["Close"].shift(1))
+        else:
+            print("Warning: Benchmark data empty. Proceeding without benchmark.")
+            enable_benchmark = False
+
+    # 2. SETUP
     train_size = int(train_years * 252)
     test_size = int(test_months * 21)
     total_len = len(returns)
+
     wf_returns = []
+    wf_bench_returns = []
 
     # Store dates for visualization
     viz_train_dates = []
@@ -333,22 +361,30 @@ def walkforward_optimization(
     current_idx = train_size
     print(f"Starting Walk-Forward ({train_years}y train -> {test_months}m test)...")
 
+    # 3. MAIN LOOP
     while current_idx < total_len:
         train_start = current_idx - train_size
         train_end = current_idx
         test_end = min(current_idx + test_size, total_len)
 
+        # Optimization Data
         train_data = returns.iloc[train_start:train_end]
-        test_data = returns.iloc[train_end:test_end]
 
-        if test_data.empty:
+        # Test Data (Real window for results)
+        test_data_real = returns.iloc[train_end:test_end]
+
+        # Test Data (With Warmup Buffer for Indicators)
+        warmup_start = max(0, train_end - lookback_buffer)
+        test_data_with_warmup = returns.iloc[warmup_start:test_end]
+
+        if test_data_real.empty:
             break
 
-        # Save dates for timeline plot
+        # Store dates for timeline plot
         viz_train_dates.append((train_data.index[0], train_data.index[-1]))
-        viz_test_dates.append((test_data.index[0], test_data.index[-1]))
+        viz_test_dates.append((test_data_real.index[0], test_data_real.index[-1]))
 
-        # --- OPTIMIZATION (In-Sample) ---
+        # --- A. OPTIMIZATION (In-Sample) ---
         best_sharpe = -np.inf
         best_params = None
         for params in param_grid:
@@ -357,17 +393,37 @@ def walkforward_optimization(
                 best_sharpe = sharpe
                 best_params = params
 
-        # --- TESTING (Out-of-Sample) ---
-        _, _, period_returns = run_backtest(test_data, strategy, best_params, cost_bps)
+        # --- B. TEST EXECUTION (Out-of-Sample) ---
+        # Run on warmup data to prime indicators
+        _, _, full_period_returns = run_backtest(
+            test_data_with_warmup, strategy, best_params, cost_bps
+        )
+
+        # Slice to keep ONLY the real test window
+        period_returns = full_period_returns.reindex(test_data_real.index).fillna(0)
         wf_returns.append(period_returns)
+
+        # --- C. BENCHMARK SLICING ---
+        if enable_benchmark:
+            period_bench = bench_ret.reindex(test_data_real.index).fillna(0)
+            wf_bench_returns.append(period_bench)
+
         current_idx += test_size
 
-    # Plot the timeline
+    # 4. VISUALIZATION
     plot_walkforward_timeline(viz_train_dates, viz_test_dates)
 
-    if wf_returns:
-        return pd.concat(wf_returns)
-    return pd.Series()
+    # 5. RETURN
+    if not wf_returns:
+        return (pd.Series(), pd.Series()) if enable_benchmark else pd.Series()
+
+    final_strat = pd.concat(wf_returns)
+
+    if enable_benchmark:
+        final_bench = pd.concat(wf_bench_returns)
+        return final_strat, final_bench
+    else:
+        return final_strat
 
 
 # ---------------------------- MAIN ---------------------------- #
@@ -402,13 +458,12 @@ if __name__ == "__main__":
 
         # --- TEST 3: WALK-FORWARD ANALYSIS (ROBUSTNESS) ---
         print("\n=== TEST 3: Walk-Forward Analysis (Realistic Simulation) ===")
+        # Returns just one Series
         wf_results = walkforward_optimization(
             data,
             donchian_breakout,
             param_grid,
-            train_years=4,
-            test_months=6,
-            cost_bps=COSTS,
+            enable_benchmark=False,  # <--- Flag
         )
 
         if not wf_results.empty:
@@ -422,5 +477,40 @@ if __name__ == "__main__":
                 title=f"Cumulative Log Returns (Walk-Forward): {TICKER}",
             )
             plt.ylabel("Log Return")
+            plt.grid(alpha=0.2)
+            plt.show(block=False)
+
+        # Returns Tuple (Strategy, Benchmark)
+        wf_results, wf_bench = walkforward_optimization(
+            data,
+            donchian_breakout,
+            param_grid,
+            enable_benchmark=True,  # <--- Flag
+        )
+
+        if not wf_results.empty:
+            plt.figure(figsize=(14, 8))
+
+            # Calculate Cumulative Returns
+            strat_cum = wf_results.cumsum()
+            bench_cum = wf_bench.cumsum()
+
+            plt.plot(
+                strat_cum.index,
+                strat_cum,
+                label="Strategy (Walk-Forward)",
+                color="#00ff00",
+            )
+            plt.plot(
+                bench_cum.index,
+                bench_cum,
+                label="S&P 500 (Benchmark)",
+                color="orange",
+                alpha=0.7,
+            )
+
+            plt.title("Walk-Forward Performance vs Benchmark")
+            plt.ylabel("Cumulative Log Return")
+            plt.legend()
             plt.grid(alpha=0.2)
             plt.show()
