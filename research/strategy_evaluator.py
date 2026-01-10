@@ -217,7 +217,7 @@ def permutation_test(
     perm_pfs = np.array(perm_pfs)
     p_value = (np.sum(perm_pfs >= real_pf) + 1) / (n_permutations + 1)
 
-    plt.figure(figsize=(14, 8))
+    plt.figure(figsize=(10, 6))
     plt.hist(perm_pfs, bins=30, alpha=0.7, label="Random Data PFs", color="skyblue")
     plt.axvline(
         real_pf,
@@ -234,7 +234,7 @@ def permutation_test(
 
 def plot_synthetic_paths(returns: pd.DataFrame, n_paths: int = 10):
     """Visualizes N random price paths vs the Real path."""
-    plt.figure(figsize=(14, 8))
+    plt.figure(figsize=(10, 6))
 
     # Plot random paths
     for i in range(n_paths):
@@ -261,6 +261,52 @@ def plot_synthetic_paths(returns: pd.DataFrame, n_paths: int = 10):
     plt.show(block=False)
 
 
+def plot_parameter_sensitivity(
+    returns: pd.DataFrame,
+    strategy: Callable,
+    param_name: str,
+    param_range: range,
+    cost_bps: float = 0.001,
+):
+    """
+    Runs the strategy over a range of parameters on the FULL dataset (In-Sample)
+    to check for stability (The "Hill" vs "Spike").
+    """
+    sharpes = []
+    pfs = []
+
+    print(
+        f"Scanning parameter '{param_name}' from {param_range[0]} to {param_range[-1]}..."
+    )
+
+    for val in param_range:
+        params = {param_name: val}
+        pf, sharpe, _ = run_backtest(returns, strategy, params, cost_bps)
+        sharpes.append(sharpe)
+        pfs.append(pf)
+
+    # Plotting
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    color = "tab:green"
+    ax1.set_xlabel(f"Parameter: {param_name}")
+    ax1.set_ylabel("Sharpe Ratio", color=color)
+    ax1.plot(param_range, sharpes, color=color, label="Sharpe")
+    ax1.tick_params(axis="y", labelcolor=color)
+    ax1.grid(True, alpha=0.3)
+
+    ax2 = ax1.twinx()  # Instantiate a second axes that shares the same x-axis
+    color = "royalblue"
+    ax2.set_ylabel(
+        "Profit Factor", color=color
+    )  # we already handled the x-label with ax1
+    ax2.plot(param_range, pfs, color=color, alpha=0.5, label="Profit Factor")
+    ax2.tick_params(axis="y", labelcolor=color)
+
+    plt.title(f"Parameter Stability Analysis: {strategy.__name__}")
+    plt.show(block=False)
+
+
 # ---------------------------- 5. WALK-FORWARD ENGINE ---------------------------- #
 
 
@@ -268,7 +314,7 @@ def plot_walkforward_timeline(train_periods: List[Tuple], test_periods: List[Tup
     """
     Creates a Gantt chart showing the sliding windows.
     """
-    fig, ax = plt.subplots(figsize=(15, 8))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     # For each window, plot a bar for Train and a bar for Test
     for i, (train_rng, test_rng) in enumerate(zip(train_periods, test_periods)):
@@ -426,6 +472,119 @@ def walkforward_optimization(
         return final_strat
 
 
+def get_block_bootstrap(
+    returns: pd.DataFrame, block_size: int = 63, seed=None
+) -> pd.DataFrame:
+    """
+    Generates synthetic price history using Block Bootstrapping.
+    block_size: 21 = 1 month, 63 = 1 quarter, 252 = 1 year.
+    Preserves trends/volatility clusters WITHIN the block, but randomizes the order of blocks.
+    """
+    np.random.seed(seed)
+
+    # 1. Prepare Returns
+    log_ret = np.log(returns[["Open", "High", "Low", "Close"]]).diff().iloc[1:]
+    n_samples = len(log_ret)
+
+    # 2. Create Blocks
+    # We simply chop the data into N blocks
+    # Note: A more advanced version is "Circular Block Bootstrap", but this is sufficient for now.
+    n_blocks = int(np.ceil(n_samples / block_size))
+
+    blocks = []
+    for i in range(n_blocks):
+        start = i * block_size
+        end = min((i + 1) * block_size, n_samples)
+        blocks.append(log_ret.iloc[start:end])
+
+    # 3. Shuffle Blocks
+    # We sample blocks with replacement to create a new history
+    random_indices = np.random.randint(0, len(blocks), size=len(blocks))
+    shuffled_blocks = [blocks[i] for i in random_indices]
+
+    # 4. Reconstruct Path
+    synthetic_returns = pd.concat(shuffled_blocks).reset_index(drop=True)
+
+    # Trim to original length if needed
+    synthetic_returns = synthetic_returns.iloc[:n_samples]
+
+    # Reconstruct Prices from Returns
+    start_price = returns.iloc[0]
+    cum_ret = synthetic_returns.cumsum()
+    new_prices = np.exp(cum_ret) * start_price
+
+    # Re-assign original index
+    new_prices.index = returns.index[1 : len(new_prices) + 1]
+
+    return new_prices
+
+
+def synthetic_walkforward_stress_test(
+    returns: pd.DataFrame,
+    strategy: Callable,
+    param_grid: List[dict],
+    n_synthetic_runs: int = 10,
+    cost_bps: float = 0.001,
+):
+    """
+    Runs the full Walk-Forward Optimization on N DIFFERENT synthetic block-bootstrapped histories.
+    This tests if your WFA performance is an artifact of the specific historical sequence.
+    """
+    print(
+        f"\n--- Running Synthetic Walk-Forward Stress Test ({n_synthetic_runs} runs) ---"
+    )
+
+    real_wf_curve = None
+    synthetic_curves = []
+
+    # 1. Run Real WFA First (Baseline)
+    print("Running Baseline (Real Data)...")
+    real_wf = walkforward_optimization(
+        returns, strategy, param_grid, cost_bps=cost_bps, enable_benchmark=False
+    )
+    if not real_wf.empty:
+        real_wf_curve = real_wf.cumsum()
+
+    # 2. Run Synthetic WFAs
+    for i in range(n_synthetic_runs):
+        print(f"Running Synthetic Path {i + 1}/{n_synthetic_runs}...")
+        # Create synthetic history (Block size 63 = ~3 months preserves quarterly trends)
+        synth_data = get_block_bootstrap(returns, block_size=63, seed=i)
+
+        # Run WFA on this weird new world
+        synth_wf = walkforward_optimization(
+            synth_data, strategy, param_grid, cost_bps=cost_bps, enable_benchmark=False
+        )
+
+        if not synth_wf.empty:
+            synthetic_curves.append(synth_wf.cumsum())
+
+    # 3. Plot Spaghetti
+    plt.figure(figsize=(10, 6))
+
+    # Plot Synthetic
+    for curve in synthetic_curves:
+        # We need to reset index to integers to align them on the plot,
+        # since synthetic dates might not match perfectly if we used different lengths
+        plt.plot(range(len(curve)), curve.values, color="grey", alpha=0.3)
+
+    # Plot Real
+    if real_wf_curve is not None:
+        plt.plot(
+            range(len(real_wf_curve)),
+            real_wf_curve.values,
+            color="#00ff00",
+            linewidth=2,
+            label="Real History",
+        )
+
+    plt.title("Synthetic Walk-Forward Stress Test (Block Bootstrap)")
+    plt.ylabel("Cumulative Log Return")
+    plt.xlabel("Trading Days")
+    plt.legend()
+    plt.show()
+
+
 # ---------------------------- MAIN ---------------------------- #
 
 if __name__ == "__main__":
@@ -437,6 +596,13 @@ if __name__ == "__main__":
 
     if not data.empty:
         param_grid = [{"lookback": i} for i in range(20, 150, 10)]
+
+        # 1. Parameter Stability
+        # Check if 'lookback' is stable between 20 and 150
+        print("\n=== TEST 0: Parameter Stability Analysis ===")
+        plot_parameter_sensitivity(
+            data, donchian_breakout, "lookback", range(20, 150, 5), COSTS
+        )
 
         # --- TEST 1: IN-SAMPLE EXCELLENCE ---
         print("\n=== TEST 1: In-Sample Excellence (Baseline) ===")
@@ -456,61 +622,70 @@ if __name__ == "__main__":
             data, donchian_breakout, {"lookback": 50}, n_permutations=10000
         )
 
-        # --- TEST 3: WALK-FORWARD ANALYSIS (ROBUSTNESS) ---
-        print("\n=== TEST 3: Walk-Forward Analysis (Realistic Simulation) ===")
-        # Returns just one Series
-        wf_results = walkforward_optimization(
+        # This generates 5 alternate universes and sees if your WFA logic holds up
+        synthetic_walkforward_stress_test(
             data,
             donchian_breakout,
             param_grid,
-            enable_benchmark=False,  # <--- Flag
+            n_synthetic_runs=5,  # Start small, it's computationally heavy!
+            cost_bps=COSTS,
         )
 
-        if not wf_results.empty:
-            pf_wf, sharpe_wf, _ = evaluate_performance(wf_results)
-            print("\nFinal Walk-Forward Performance:")
-            print(f"PF: {pf_wf:.2f} | Sharpe: {sharpe_wf:.2f}")
+        # # --- TEST 3: WALK-FORWARD ANALYSIS (ROBUSTNESS) ---
+        # print("\n=== TEST 3: Walk-Forward Analysis (Realistic Simulation) ===")
+        # # Returns just one Series
+        # wf_results = walkforward_optimization(
+        #     data,
+        #     donchian_breakout,
+        #     param_grid,
+        #     enable_benchmark=False,  # <--- Flag
+        # )
 
-            plt.figure(figsize=(14, 8))
-            wf_results.cumsum().plot(
-                color="#00ff00",
-                title=f"Cumulative Log Returns (Walk-Forward): {TICKER}",
-            )
-            plt.ylabel("Log Return")
-            plt.grid(alpha=0.2)
-            plt.show(block=False)
+        # if not wf_results.empty:
+        #     pf_wf, sharpe_wf, _ = evaluate_performance(wf_results)
+        #     print("\nFinal Walk-Forward Performance:")
+        #     print(f"PF: {pf_wf:.2f} | Sharpe: {sharpe_wf:.2f}")
 
-        # Returns Tuple (Strategy, Benchmark)
-        wf_results, wf_bench = walkforward_optimization(
-            data,
-            donchian_breakout,
-            param_grid,
-            enable_benchmark=True,  # <--- Flag
-        )
+        #     plt.figure(figsize=(10, 6))
+        #     wf_results.cumsum().plot(
+        #         color="#00ff00",
+        #         title=f"Cumulative Log Returns (Walk-Forward): {TICKER}",
+        #     )
+        #     plt.ylabel("Log Return")
+        #     plt.grid(alpha=0.2)
+        #     plt.show(block=False)
 
-        if not wf_results.empty:
-            plt.figure(figsize=(14, 8))
+        # # Returns Tuple (Strategy, Benchmark)
+        # wf_results, wf_bench = walkforward_optimization(
+        #     data,
+        #     donchian_breakout,
+        #     param_grid,
+        #     enable_benchmark=True,  # <--- Flag
+        # )
 
-            # Calculate Cumulative Returns
-            strat_cum = wf_results.cumsum()
-            bench_cum = wf_bench.cumsum()
+        # if not wf_results.empty:
+        #     plt.figure(figsize=(10, 6))
 
-            plt.plot(
-                strat_cum.index,
-                strat_cum,
-                label="Strategy (Walk-Forward)",
-                color="#00ff00",
-            )
-            plt.plot(
-                bench_cum.index,
-                bench_cum,
-                label="S&P 500 (Benchmark)",
-                color="orange",
-                alpha=0.7,
-            )
+        #     # Calculate Cumulative Returns
+        #     strat_cum = wf_results.cumsum()
+        #     bench_cum = wf_bench.cumsum()
 
-            plt.title("Walk-Forward Performance vs Benchmark")
-            plt.ylabel("Cumulative Log Return")
-            plt.legend()
-            plt.grid(alpha=0.2)
-            plt.show()
+        #     plt.plot(
+        #         strat_cum.index,
+        #         strat_cum,
+        #         label="Strategy (Walk-Forward)",
+        #         color="#00ff00",
+        #     )
+        #     plt.plot(
+        #         bench_cum.index,
+        #         bench_cum,
+        #         label="S&P 500 (Benchmark)",
+        #         color="orange",
+        #         alpha=0.7,
+        #     )
+
+        #     plt.title("Walk-Forward Performance vs Benchmark")
+        #     plt.ylabel("Cumulative Log Return")
+        #     plt.legend()
+        #     plt.grid(alpha=0.2)
+        #     plt.show()
