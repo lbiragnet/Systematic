@@ -307,6 +307,48 @@ def plot_parameter_sensitivity(
     plt.show(block=False)
 
 
+def select_robust_params(
+    returns: pd.DataFrame,
+    strategy: Callable,
+    param_name: str,
+    param_range: range,
+    cost_bps: float,
+) -> dict:
+    """
+    Scans the parameter range and picks the 'center of mass' of the best cluster.
+    Avoids picking a 'spike' (outlier).
+    """
+    results = []
+
+    # 1. Scan all parameters
+    for val in param_range:
+        params = {param_name: val}
+        _, sharpe, _ = run_backtest(returns, strategy, params, cost_bps)
+        results.append({"val": val, "sharpe": sharpe})
+
+    df = pd.DataFrame(results)
+
+    # 2. Filter for "Good" parameters (e.g., Top 33% of performance)
+    # This identifies the "Plateau"
+    sharpe_threshold = df["sharpe"].quantile(0.66)
+    good_params = df[df["sharpe"] >= sharpe_threshold]
+
+    if good_params.empty:
+        print("No stable parameter region found. Defaulting to middle.")
+        best_val = param_range[len(param_range) // 2]
+    else:
+        # 3. Pick the Median of the good parameters
+        # This puts us in the safest spot—the middle of the hill.
+        best_val = int(good_params["val"].median())
+
+        # Snap to step size (optional, keeps things clean)
+        step = param_range.step
+        best_val = round(best_val / step) * step
+
+    print(f"Robust Parameter Selected: {param_name}={best_val} (Median of Top Tier)")
+    return {param_name: best_val}
+
+
 # ---------------------------- 5. WALK-FORWARD ENGINE ---------------------------- #
 
 
@@ -457,7 +499,7 @@ def walkforward_optimization(
         current_idx += test_size
 
     # 4. VISUALIZATION
-    plot_walkforward_timeline(viz_train_dates, viz_test_dates)
+    # plot_walkforward_timeline(viz_train_dates, viz_test_dates)
 
     # 5. RETURN
     if not wf_returns:
@@ -525,6 +567,7 @@ def synthetic_walkforward_stress_test(
     param_grid: List[dict],
     n_synthetic_runs: int = 10,
     cost_bps: float = 0.001,
+    lookback_buffer: int = 500,
 ):
     """
     Runs the full Walk-Forward Optimization on N DIFFERENT synthetic block-bootstrapped histories.
@@ -538,9 +581,14 @@ def synthetic_walkforward_stress_test(
     synthetic_curves = []
 
     # 1. Run Real WFA First (Baseline)
-    print("Running Baseline (Real Data)...")
+    # We pass the lookback_buffer here
     real_wf = walkforward_optimization(
-        returns, strategy, param_grid, cost_bps=cost_bps, enable_benchmark=False
+        returns,
+        strategy,
+        param_grid,
+        cost_bps=cost_bps,
+        enable_benchmark=False,
+        lookback_buffer=lookback_buffer,
     )
     if not real_wf.empty:
         real_wf_curve = real_wf.cumsum()
@@ -548,12 +596,16 @@ def synthetic_walkforward_stress_test(
     # 2. Run Synthetic WFAs
     for i in range(n_synthetic_runs):
         print(f"Running Synthetic Path {i + 1}/{n_synthetic_runs}...")
-        # Create synthetic history (Block size 63 = ~3 months preserves quarterly trends)
         synth_data = get_block_bootstrap(returns, block_size=63, seed=i)
 
-        # Run WFA on this weird new world
+        # We pass the lookback_buffer here too
         synth_wf = walkforward_optimization(
-            synth_data, strategy, param_grid, cost_bps=cost_bps, enable_benchmark=False
+            synth_data,
+            strategy,
+            param_grid,
+            cost_bps=cost_bps,
+            enable_benchmark=False,
+            lookback_buffer=lookback_buffer,
         )
 
         if not synth_wf.empty:
@@ -589,46 +641,59 @@ def synthetic_walkforward_stress_test(
 
 if __name__ == "__main__":
     plt.style.use("dark_background")
-    TICKER = "SPY"
+    TICKER = "BTC-USD"
     COSTS = 0.0005  # 5 bps
+    SAFE_BUFFER = 1000
 
-    data = fetch_historical_data(TICKER, start_date="2005-01-01")
+    data = fetch_historical_data(
+        TICKER, start_date="2015-01-01"
+    )  # Changed to 2015 for better crypto data quality
 
     if not data.empty:
-        param_grid = [{"lookback": i} for i in range(20, 150, 10)]
+        # Define the Search Space (The "Plateau" you found earlier)
+        search_range = range(200, 500, 10)
+        param_grid = [{"lookback": i} for i in search_range]
 
-        # 1. Parameter Stability
-        # Check if 'lookback' is stable between 20 and 150
+        # --- TEST 0: ROBUST SELECTION ---
         print("\n=== TEST 0: Parameter Stability Analysis ===")
+        # 1. Visualize (for you)
         plot_parameter_sensitivity(
-            data, donchian_breakout, "lookback", range(20, 150, 5), COSTS
+            data, donchian_breakout, "lookback", search_range, COSTS
+        )
+
+        # 2. Select (for the machine)
+        # This replaces the hardcoded {"lookback": 50}
+        robust_params = select_robust_params(
+            data, donchian_breakout, "lookback", search_range, COSTS
         )
 
         # --- TEST 1: IN-SAMPLE EXCELLENCE ---
         print("\n=== TEST 1: In-Sample Excellence (Baseline) ===")
-        # This checks: "Does a single best parameter set work on the whole history?"
-        # It is biased, but if this fails, everything fails.
+        # Uses the robustly selected parameter automatically
         best_pf, best_sharpe, _ = run_backtest(
-            data, donchian_breakout, {"lookback": 50}, COSTS
+            data, donchian_breakout, robust_params, COSTS
         )
-        print(f"Baseline Result -> PF: {best_pf:.2f} | Sharpe: {best_sharpe:.2f}")
+        print(
+            f"Baseline Result ({robust_params}) -> PF: {best_pf:.2f} | Sharpe: {best_sharpe:.2f}"
+        )
 
         # --- TEST 2: PERMUTATION (DATA MINING BIAS) ---
         print("\n=== TEST 2: Permutation Test (Checking for Luck) ===")
-        # Visualize the synthetic worlds first
+        # Visualize synthetic worlds
         plot_synthetic_paths(data, n_paths=15)
-        # Uncomment below to run the actual statistical test (takes time)
-        permutation_test(
-            data, donchian_breakout, {"lookback": 50}, n_permutations=10000
-        )
 
-        # This generates 5 alternate universes and sees if your WFA logic holds up
+        # Run test using the ROBUST parameter
+        permutation_test(data, donchian_breakout, robust_params, n_permutations=1000)
+
+        # --- TEST 3: SYNTHETIC WALK-FORWARD STRESS TEST ---
+        # This uses the full grid, so it does its own optimization
         synthetic_walkforward_stress_test(
             data,
             donchian_breakout,
             param_grid,
-            n_synthetic_runs=5,  # Start small, it's computationally heavy!
+            n_synthetic_runs=5,
             cost_bps=COSTS,
+            lookback_buffer=SAFE_BUFFER,
         )
 
         # # --- TEST 3: WALK-FORWARD ANALYSIS (ROBUSTNESS) ---
