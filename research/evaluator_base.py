@@ -306,6 +306,7 @@ class BlockBoostrappingEvaluator(Evaluator):
         n_runs: int = 5,
         verbose: bool = True,
     ):
+        """Main function for running the evaluator."""
         print(f"\n--- Running Block Bootstrapping Test ({n_runs} runs) ---")
         synthetic_curves = []
 
@@ -377,23 +378,10 @@ class BlockBoostrappingEvaluator(Evaluator):
         plt.show()
 
 
-# ==========================================
-# 5. FUTURE: REGIME SWITCHING SKELETON
-# ==========================================
-
-
-class RegimeSwitchingEvaluator(Evaluator):
-    def evaluate(self, data: pd.DataFrame, strategy: Strategy, params: Any):
-        print("TODO: Implement Regime Switching Generation logic here")
-        # 1. Train HMM on 'data'
-        # 2. Generate N synthetic paths using HMM
-        # 3. Run backtests on paths
-        pass
-
-
-# ==========================================
+# ============================================================
 # MAIN EXECUTION
-# ==========================================
+# ============================================================
+
 
 if __name__ == "__main__":
     plt.style.use("dark_background")
