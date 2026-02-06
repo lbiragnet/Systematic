@@ -152,7 +152,7 @@ class PermutationBootstrappingEvaluator(Evaluator):
 
     def _plot(self, real_pf, perm_pfs, p_value):
         """Plot histogram of results."""
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 6))
         plt.hist(perm_pfs, bins=30, alpha=0.7, color="skyblue", label="Random PFs")
         plt.axvline(
             real_pf,
@@ -237,7 +237,7 @@ class WalkForwardEvaluator(Evaluator):
         """
         Creates a Gantt chart showing the sliding windows.
         """
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(12, 6))
 
         # For each window, plot a bar for Train and a bar for Test
         for i, (train_rng, test_rng) in enumerate(zip(train, test)):
@@ -305,9 +305,11 @@ class BlockBoostrappingEvaluator(Evaluator):
         param_grid: List[Dict],
         n_runs: int = 5,
         verbose: bool = True,
+        plots_block: bool = True,
     ):
         """Main function for running the evaluator."""
-        print(f"\n--- Running Block Bootstrapping Test ({n_runs} runs) ---")
+        if verbose:
+            print(f"\n--- Running Block Bootstrapping Test ({n_runs} runs) ---")
         synthetic_curves = []
 
         # Real Run
@@ -322,7 +324,9 @@ class BlockBoostrappingEvaluator(Evaluator):
                 synthetic_curves.append(curve.cumsum())
 
         self._plot_spaghetti(
-            real_curve.cumsum() if not real_curve.empty else None, synthetic_curves
+            real_curve.cumsum() if not real_curve.empty else None,
+            synthetic_curves,
+            plots_block=plots_block,
         )
 
     def _get_block_bootstrap(
@@ -360,9 +364,14 @@ class BlockBoostrappingEvaluator(Evaluator):
 
         return new_prices
 
-    def _plot_spaghetti(self, real_curve: pd.Series, synth_curves: List[pd.Series]):
+    def _plot_spaghetti(
+        self,
+        real_curve: pd.Series,
+        synth_curves: List[pd.Series],
+        plots_block: bool = False,
+    ):
         """Plot curves of bootstrapped price series vs real curve."""
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 6))
         for c in synth_curves:
             plt.plot(range(len(c)), c.values, color="grey", alpha=0.5)
         if real_curve is not None:
@@ -375,7 +384,7 @@ class BlockBoostrappingEvaluator(Evaluator):
             )
         plt.title("Block Bootstrapping Test")
         plt.legend()
-        plt.show()
+        plt.show(block=plots_block)
 
 
 # ============================================================
