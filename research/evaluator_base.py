@@ -4,13 +4,13 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Patch
-from typing import List, Tuple, Union, Dict, Any
+from typing import List, Tuple, Dict, Any
 from abc import ABC, abstractmethod
 from joblib import Parallel, delayed
 from tqdm import tqdm
 import warnings
 
-from time_series_strategies import *
+from time_series_strategies import Strategy, DonchianBreakout
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -43,7 +43,6 @@ class DataLoader:
 
 
 class BacktestEngine:
-
     def __init__(self, cost_bps: float = 0.001):
         self.cost_bps = cost_bps
 
@@ -182,7 +181,7 @@ class WalkForwardEvaluator(Evaluator):
         verbose: bool = True,  # don't display text / plots when using as part of block bootstrap test
     ):
         if verbose:
-            print(f"\n--- Running Walk-Forward Optimization ---")
+            print("\n--- Running Walk-Forward Optimization ---")
         train_size = int(train_years * 252)
         test_size = int(test_months * 21)
         total_len = len(data)

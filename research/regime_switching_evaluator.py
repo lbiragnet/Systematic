@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 from typing import List, Dict
 from tqdm import tqdm

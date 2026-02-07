@@ -2,7 +2,8 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
-from typing import List, Dict
+from typing import List
+from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
 
 class PortfolioDataLoader:
@@ -69,10 +70,6 @@ class PortfolioBacktester:
         momentum = self.prices.pct_change(lookback_days)
         rebalance_dates = self.prices.resample(rebalance_freq).last().index
 
-        portfolio_curve = []
-        current_holdings = None
-
-        capital = 1.0
         daily_returns = []
 
         # Align rebalance dates to the price index
@@ -105,7 +102,6 @@ class PortfolioBacktester:
 
             # B. Rebalance Logic
             if is_rebalance_day[t]:
-
                 # Enforce a break if regime is highly volatile
                 if regime_signal is not None and is_volatile[t]:
                     weights = np.zeros(n_assets)
@@ -142,42 +138,6 @@ class PortfolioBacktester:
 # ==========================================
 # MAIN EXECUTION (PORTFOLIO)
 # ==========================================
-
-# if __name__ == "__main__":
-#     plt.style.use("dark_background")
-
-#     # XLK=Tech, XLE=Energy, XLF=Finance, TLT=Bonds, GLD=Gold, BTC=Bitcoin
-#     universe = ["XLK", "XLE", "XLF", "TLT", "GLD", "BTC-USD"]
-#     loader = PortfolioDataLoader()
-#     prices = loader.fetch_universe(universe, start_date="2016-01-01")
-
-#     if not prices.empty:
-#         backtester = PortfolioBacktester(prices)
-#         # Run Strategy: "Buy the Top 2 winners based on 6-month momentum"
-#         equity, final_weights = backtester.run_momentum_strategy(
-#             lookback_days=126,
-#             top_n=2,
-#             rebalance_freq="ME",  # Rebalance Monthly
-#         )
-
-#         # Benchmark (Equal Weight Buy & Hold of the Universe)
-#         avg_ret = backtester.returns.mean(axis=1).cumsum()
-#         avg_ret = avg_ret[equity.index]  # Align dates
-
-#         plt.figure(figsize=(12, 6))
-#         plt.plot(equity, color="#00ff00", label="Racing Car (Momentum)", linewidth=2)
-#         plt.plot(
-#             avg_ret, color="grey", label="Equal Weight Universe (Benchmark)", alpha=0.7
-#         )
-#         plt.title("Cross-Sectional Momentum: Rotating into Strength")
-#         plt.ylabel("Cumulative Log Return")
-#         plt.legend()
-#         plt.grid(alpha=0.2)
-#         plt.show()
-
-
-# Import the HMM logic (assuming it's in oo_strategy_evaluator.py or you paste the method here)
-from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
 
 def get_regime_signal(prices: pd.DataFrame, trend_window: int = 200):
@@ -222,61 +182,7 @@ def get_regime_signal(prices: pd.DataFrame, trend_window: int = 200):
     return final_signal
 
 
-# if __name__ == "__main__":
-#     # ... (Setup code same as before) ...
-#     plt.style.use("dark_background")
-#     # XLK=Tech, XLE=Energy, XLF=Finance, TLT=Bonds, GLD=Gold, BTC=Bitcoin
-#     universe = ["XLK", "XLE", "XLF", "TLT", "GLD", "BTC-USD"]
-#     loader = PortfolioDataLoader()
-#     prices = loader.fetch_universe(universe, start_date="2016-01-01")
-
-#     if not prices.empty:
-#         backtester = PortfolioBacktester(prices)
-
-#         # 4. Generate Traffic Light Signal
-#         regime_signal = get_regime_signal(prices)
-
-#         # 5. Run Unfiltered Strategy (Benchmark for comparison)
-#         equity_raw, _ = backtester.run_momentum_strategy(
-#             lookback_days=126, top_n=2, rebalance_freq="M", regime_signal=None
-#         )
-
-#         # 6. Run Filtered Strategy (The Smart Car)
-#         equity_smart, _ = backtester.run_momentum_strategy(
-#             lookback_days=126, top_n=2, rebalance_freq="M", regime_signal=regime_signal
-#         )
-
-#         # 7. Plot Comparison
-#         plt.figure(figsize=(12, 6))
-#         plt.plot(equity_raw, color="grey", label="Raw Momentum (No Brakes)", alpha=0.6)
-#         plt.plot(
-#             equity_smart,
-#             color="#00ff00",
-#             label="Smart Momentum (With Regime Filter)",
-#             linewidth=2,
-#         )
-
-#         # Plot the Regime (Red background for crash mode)
-#         # We scale it to fit the chart for visualization
-#         ymin, ymax = plt.ylim()
-#         plt.fill_between(
-#             regime_signal.index,
-#             ymin,
-#             ymax,
-#             where=(regime_signal == 1),
-#             color="red",
-#             alpha=0.1,
-#             label="Crash Regime (Cash)",
-#         )
-
-#         plt.title("The Effect of a Regime Filter (Traffic Light)")
-#         plt.ylabel("Cumulative Log Return")
-#         plt.legend()
-#         plt.show()
-
-
 if __name__ == "__main__":
-    # ... Setup ...
     plt.style.use("dark_background")
 
     universe = ["XLK", "XLE", "XLF", "TLT", "GLD", "BTC-USD"]
@@ -284,7 +190,6 @@ if __name__ == "__main__":
     prices = loader.fetch_universe(universe, start_date="2016-01-01")
 
     if not prices.empty:
-
         backtester = PortfolioBacktester(prices)
         # Basic momentum - no synthetic cash
         basic_equity, basic_final_weights = backtester.run_momentum_strategy(
@@ -297,7 +202,6 @@ if __name__ == "__main__":
         basic_avg_ret = backtester.returns.mean(axis=1).cumsum()
         basic_avg_ret = basic_avg_ret[basic_equity.index]  # Align dates
 
-        # --- THE FIX: ADD SYNTHETIC CASH ---
         # Create a column of 1.0s (or a slow upward drift for interest rates)
         # For simplicity, we assume Risk-Free Rate is 0% (Flat line)
         # Ideally, fetch 'SHV' (Short Treasury ETF) instead, but this works for simulation.
