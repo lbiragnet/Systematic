@@ -242,6 +242,8 @@ if __name__ == "__main__":
         plt.title(
             "Comparison of Momentum with 'SHV' as a Safety Valve, Simple Momentum, and Benchmark"
         )
+        plt.legend()
+        plt.grid(color="gray", alpha=0.3, linewidth=0.5)
         plt.show()
 
         # Check if it picked Cash in 2022
