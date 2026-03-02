@@ -4,7 +4,7 @@ from live_strategy_base import LiveStrategyBase
 
 class LiveDonchianBtcusd(LiveStrategyBase):
     def __init__(self):
-        super().__init__(name="donchian_BtcUsd")
+        super().__init__(name="donchian_BTC")
         self.ticker = "BTC-USD"
         self.lookback = 200
 
@@ -13,11 +13,18 @@ class LiveDonchianBtcusd(LiveStrategyBase):
 
         # 1. Get Data
         df = yf.download(self.ticker, period="1y", interval="1d", progress=False)
-        current_price = df["Close"].iloc[-1]
+
+        # FIX: Squeeze the DataFrame into a flat Series and force it to be a float
+        close_prices = df["Close"].squeeze()
+        current_price = float(close_prices.iloc[-1])
 
         # 2. Calculate Indicators
-        upper_channel = df["Close"].rolling(self.lookback).max().shift(1).iloc[-1]
-        lower_channel = df["Close"].rolling(self.lookback).min().shift(1).iloc[-1]
+        upper_channel = float(
+            close_prices.rolling(self.lookback).max().shift(1).iloc[-1]
+        )
+        lower_channel = float(
+            close_prices.rolling(self.lookback).min().shift(1).iloc[-1]
+        )
 
         # 3. Determine Signal
         target_qty = 0.0

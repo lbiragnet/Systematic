@@ -16,7 +16,7 @@ def main():
 
     # 2. Map the text argument to the actual Python class
     strategy_map = {
-        "donchian_BtcUsd": LiveDonchianBtcusd,
+        "donchian_BTC": LiveDonchianBtcusd,
         # "momentum": LiveMomentum,
     }
 
