@@ -1,6 +1,5 @@
 # system/toggle_strategy.py
 import sqlite3
-import sys
 import argparse
 
 
