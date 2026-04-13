@@ -45,6 +45,19 @@ class AlphaMiner:
         # Acceleration
         features["acceleration_1m_3m"] = features["mom_1m"] - features["mom_3m"]
 
+        # What the hell is this
+        aroon_lookback = 25
+        features["aroon_up"] = (
+            100
+            * self.returns.rolling(aroon_lookback).apply(lambda x: x.argmax())
+            / aroon_lookback
+        )
+        features["aroon_down"] = (
+            100
+            * self.returns.rolling(aroon_lookback).apply(lambda x: x.argmin())
+            / aroon_lookback
+        )
+
         return features
 
     def evaluate_alphas(self, forward_horizon: int = 5, verbose=True):
@@ -279,64 +292,6 @@ class AlphaMiner:
 if __name__ == "__main__":
     plt.style.use("dark_background")
 
-    sector_map = {
-        # Technology & Communication
-        "AAPL": "Tech",
-        "MSFT": "Tech",
-        "NVDA": "Tech",
-        "GOOGL": "Tech",
-        "META": "Tech",
-        "AMZN": "Tech",
-        "AVGO": "Tech",
-        "CSCO": "Tech",
-        "ORCL": "Tech",
-        "CRM": "Tech",
-        "AMD": "Tech",
-        "INTC": "Tech",
-        "TXN": "Tech",
-        "QCOM": "Tech",
-        "IBM": "Tech",
-        # Financials
-        "JPM": "Finance",
-        "BAC": "Finance",
-        "WFC": "Finance",
-        "C": "Finance",
-        "GS": "Finance",
-        "MS": "Finance",
-        "V": "Finance",
-        "MA": "Finance",
-        "AXP": "Finance",
-        "SPGI": "Finance",
-        # Healthcare
-        "JNJ": "Health",
-        "UNH": "Health",
-        "LLY": "Health",
-        "MRK": "Health",
-        "ABBV": "Health",
-        "PFE": "Health",
-        "TMO": "Health",
-        "DHR": "Health",
-        "ABT": "Health",
-        # Consumer
-        "PG": "Consumer",
-        "KO": "Consumer",
-        "PEP": "Consumer",
-        "WMT": "Consumer",
-        "COST": "Consumer",
-        "HD": "Consumer",
-        "MCD": "Consumer",
-        "NKE": "Consumer",
-        # Industrials, Energy, Telecom
-        "XOM": "Hard_Assets",
-        "CVX": "Hard_Assets",
-        "CAT": "Hard_Assets",
-        "BA": "Hard_Assets",
-        "UNP": "Hard_Assets",
-        "T": "Hard_Assets",
-        "VZ": "Hard_Assets",
-        "DIS": "Hard_Assets",
-    }
-
     # 50 Highly Liquid US Large-Cap Stocks
     universe = [
         "AAPL",
@@ -396,24 +351,37 @@ if __name__ == "__main__":
 
     if not prices.empty:
         miner = AlphaMiner(prices)
-        features = miner._generate_features()
 
-        # # Neutralise
-        # neutral_features = {}
-        # for factor_name, raw_df in features.items():
-        #     print(f"Processing {factor_name}...")
-        #     neutral_features[factor_name] = miner.neutralize_factor(raw_df, sector_map)
+        # ==========================================
+        # STEP 1: ORIGINAL FEATURES (Primary Focus)
+        # ==========================================
+        print("\n" + "=" * 80)
+        print(" STEP 1: ORIGINAL FEATURES EVALUATION")
+        print("=" * 80)
 
-        # # Run the Grid Search on the clean, neutralized data
-        # factors_to_test = ["mom_6m", "vol_20d"]
-        # optimization_results = miner.optimize_combo_weights(
-        #     neutral_features, factors_to_test, forward_horizon=5
-        # )
+        # This internally generates features and grades them
+        alphas_leaderboard = miner.evaluate_alphas(forward_horizon=5, verbose=True)
 
-        # Run the Grid Search
+        print("\nINDIVIDUAL ALPHA LEADERBOARD")
+        print("-" * 60)
+        print(
+            alphas_leaderboard.to_string(index=False, float_format=lambda x: f"{x:.4f}")
+        )
+        print("-" * 60)
+
+        # ==========================================
+        # STEP 2: COMBINED FEATURES (Secondary Focus)
+        # ==========================================
+        print("\n" + "=" * 80)
+        print(" STEP 2: COMBINATION OPTIMIZATION (Grid Search)")
+        print("=" * 80)
+
+        # We need to grab the raw feature dictionary to feed the optimizer
+        features_dict = miner._generate_features()
         factors_to_test = ["mom_6m", "vol_20d"]
+
         optimization_results = miner.optimize_combo_weights(
-            features, factors_to_test, forward_horizon=5
+            features_dict, factors_to_test, forward_horizon=5
         )
 
         print("\nOPTIMIZATION LEADERBOARD (Sorted by IR)")
@@ -423,7 +391,41 @@ if __name__ == "__main__":
                 index=False, float_format=lambda x: f"{x:.4f}"
             )
         )
-        print("=" * 80)
+        print("-" * 80)
+
+        # ==========================================
+        # STEP 3: VISUALIZATION
+        # ==========================================
+        plt.figure(figsize=(10, 6))
+
+        # Sort values so the chart goes from worst to best
+        chart_data = alphas_leaderboard.sort_values(by="Mean IC")
+        colors = ["#00ff00" if x > 0 else "#ff0000" for x in chart_data["Mean IC"]]
+
+        plt.barh(chart_data["Alpha Factor"], chart_data["Mean IC"], color=colors)
+        plt.axvline(0, color="white", linewidth=1)
+        plt.axvline(
+            0.02,
+            color="grey",
+            linestyle="--",
+            alpha=0.5,
+            label="Tradable Edge Threshold (+)",
+        )
+        plt.axvline(
+            -0.02,
+            color="grey",
+            linestyle="--",
+            alpha=0.5,
+            label="Tradable Edge Threshold (-)",
+        )
+
+        plt.title(
+            "Information Coefficient (IC) by Alpha Factor\n(Predicting 5-Day Forward Returns)"
+        )
+        plt.xlabel("Mean IC (Higher absolute value is better)")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
 
 
 # if __name__ == "__main__":
