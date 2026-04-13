@@ -1,3 +1,5 @@
+# -------------------- IMPORTS --------------------
+
 import sqlite3
 import pandas as pd
 import matplotlib
@@ -6,8 +8,13 @@ matplotlib.use("Qt5Agg")
 
 import matplotlib.pyplot as plt
 
-# Config
+
+# -------------------- CONFIG --------------------
+
 DB_NAME = "historical_stock_data.db"
+
+
+# -------------------- INSPECTION FUNCTIONS --------------------
 
 
 def get_db_summary():
@@ -27,7 +34,7 @@ def get_db_summary():
     try:
         df = pd.read_sql(query, conn)
         if df.empty:
-            print("⚠ The database is empty.")
+            print("The database is empty.")
         else:
             print("\n--- DATABASE SUMMARY ---")
             print(df.to_string(index=False))
@@ -78,12 +85,9 @@ def plot_ticker(ticker):
     plt.show()
 
 
+# -------------------- MAIN EXECUTION BLOCK --------------------
+
 if __name__ == "__main__":
-    # 1. Show summary of all tickers
     get_db_summary()
-
-    # 2. View raw data sample for one ticker
     view_ticker_data("IBM", limit=50)
-
-    # 3. Plot chart (uncomment to run)
     plot_ticker("AAPL")

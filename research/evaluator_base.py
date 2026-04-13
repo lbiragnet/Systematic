@@ -1,3 +1,6 @@
+# ---------------------------- IMPORTS ---------------------------- #
+
+
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -15,9 +18,7 @@ from time_series_strategies import Strategy, DonchianBreakout
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
-# ============================================================
-# 1. DATA LAYER
-# ============================================================
+# ---------------------------- DATA LAYER ---------------------------- #
 
 
 class DataLoader:
@@ -33,13 +34,11 @@ class DataLoader:
                 raise ValueError("Empty DataFrame returned.")
             return df
         except Exception as e:
-            print(f"❌ Failed to fetch data: {e}")
+            print(f"Failed to fetch data: {e}")
             return pd.DataFrame()
 
 
-# ============================================================
-# 2. BACKTESTING ENGINE
-# ============================================================
+# ---------------------------- BACKTESTING ENGINE ---------------------------- #
 
 
 class BacktestEngine:
@@ -53,7 +52,7 @@ class BacktestEngine:
         try:
             signal = strategy.generate_signal(data, params)
         except Exception as e:
-            print(f"⚠️ Strategy execution error: {e}")
+            print(f"Strategy execution error: {e}")
             return 0.0, 0.0, pd.Series()
 
         # Shift signal to avoid lookahead (Signal at Close T -> Trade at Open T+1, or Close T+1 returns)
@@ -90,9 +89,7 @@ class BacktestEngine:
         return pf, sharpe
 
 
-# ============================================================
-# 3. EVALUATOR
-# ============================================================
+# ---------------------------- EVALUATOR ---------------------------- #
 
 
 class Evaluator(ABC):
@@ -178,7 +175,7 @@ class WalkForwardEvaluator(Evaluator):
         train_years: int = 4,
         test_months: int = 6,
         lookback_buffer: int = 1000,
-        verbose: bool = True,  # don't display text / plots when using as part of block bootstrap test
+        verbose: bool = True,
     ):
         if verbose:
             print("\n--- Running Walk-Forward Optimization ---")
@@ -209,7 +206,7 @@ class WalkForwardEvaluator(Evaluator):
             viz_train.append((train_data.index[0], train_data.index[-1]))
             viz_test.append((test_data_real.index[0], test_data_real.index[-1]))
 
-            # 1. Optimise on training subset
+            # Optimise on training subset
             best_sharpe = -np.inf
             best_params = None
             for p in param_grid:
@@ -218,7 +215,7 @@ class WalkForwardEvaluator(Evaluator):
                     best_sharpe = sharpe
                     best_params = p
 
-            # 2. Test
+            # Test
             _, _, full_ret = self.engine.run(test_data_warmup, strategy, best_params)
             period_ret = full_ret.reindex(test_data_real.index).fillna(0)
             wf_returns.append(period_ret)
@@ -238,9 +235,7 @@ class WalkForwardEvaluator(Evaluator):
         """
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        # For each window, plot a bar for Train and a bar for Test
         for i, (train_rng, test_rng) in enumerate(zip(train, test)):
-            # Train Bar (Blue)
             ax.barh(
                 y=i,
                 width=(train_rng[1] - train_rng[0]).days,
@@ -249,7 +244,6 @@ class WalkForwardEvaluator(Evaluator):
                 edgecolor="black",
                 alpha=0.8,
             )
-            # Test Bar (Orange)
             ax.barh(
                 y=i,
                 width=(test_rng[1] - test_rng[0]).days,
@@ -259,7 +253,6 @@ class WalkForwardEvaluator(Evaluator):
                 alpha=0.8,
             )
 
-        # Decoration
         ax.set_yticks(range(len(train)))
         ax.set_yticklabels([f"Window {i + 1}" for i in range(len(train))])
         ax.set_xlabel("Date")
@@ -267,7 +260,6 @@ class WalkForwardEvaluator(Evaluator):
             " Walk-Forward Optimization Process: Training (Blue) vs Testing (Orange)"
         )
 
-        # Format X-axis dates
         ax.xaxis.set_major_locator(mdates.YearLocator())
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
@@ -295,7 +287,7 @@ class BlockBoostrappingEvaluator(Evaluator):
 
     def __init__(self, engine: BacktestEngine, wfa_evaluator: WalkForwardEvaluator):
         super().__init__(engine)
-        self.wfa = wfa_evaluator  # Composition: Uses WFA internally
+        self.wfa = wfa_evaluator
 
     def evaluate(
         self,
@@ -317,7 +309,6 @@ class BlockBoostrappingEvaluator(Evaluator):
         # Block boostrapping Runs
         for i in tqdm(range(n_runs), desc="Block Bootstrapping Progress"):
             synth_data = self._get_block_bootstrap(data, seed=i)
-            # We suppress plots for the inner loops
             curve = self.wfa.evaluate(synth_data, strategy, param_grid, verbose=False)
             if not curve.empty:
                 synthetic_curves.append(curve.cumsum())
@@ -386,34 +377,26 @@ class BlockBoostrappingEvaluator(Evaluator):
         plt.show(block=plots_block)
 
 
-# ============================================================
-# MAIN EXECUTION
-# ============================================================
+# ---------------------------- MAIN EXECUTION BLOCK ---------------------------- #
 
 
 if __name__ == "__main__":
     plt.style.use("dark_background")
 
-    # 1. Setup Data & Engine
+    # Setup Data & Engine
     ticker = "BTC-USD"
     data = DataLoader.fetch(ticker, start_date="2015-01-01")
     engine = BacktestEngine(cost_bps=0.0005)
 
     if not data.empty:
-        # 2. Setup Strategy
         strat = DonchianBreakout()
 
-        # 3. Choose your Evaluator!
-
-        # --- A. The "Old" Permutation Test ---
         evaluator = PermutationBootstrappingEvaluator(engine)
         evaluator.evaluate(data, strat, {"lookback": 400}, n_perms=100)
 
-        # --- B. The Walk-Forward Test ---
         param_grid = [{"lookback": i} for i in range(200, 500, 20)]
         wf_evaluator = WalkForwardEvaluator(engine)
         wf_evaluator.evaluate(data, strat, param_grid)
 
-        # --- C. The Block Bootstrapping Test ---
         block_evaluator = BlockBoostrappingEvaluator(engine, wf_evaluator)
         block_evaluator.evaluate(data, strat, param_grid, n_runs=15)

@@ -1,3 +1,6 @@
+# ---------------------------- IMPORTS ---------------------------- #
+
+
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -8,10 +11,10 @@ from typing import List, Callable, Tuple, Union
 from joblib import Parallel, delayed
 import warnings
 
-# Suppress pandas fragmentation warnings for heavy backtests
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
-# ---------------------------- 1. DATA INGESTION ---------------------------- #
+
+# ---------------------------- DATA INGESTION ---------------------------- #
 
 
 def fetch_historical_data(
@@ -23,7 +26,7 @@ def fetch_historical_data(
     """
     try:
         print(f"Downloading data for {ticker}...")
-        # auto_adjust=True fixes OHLC for splits/dividends (Crucial for backtesting)
+        # auto_adjust=True fixes OHLC for splits/dividends
         df = yf.download(
             ticker, start=start_date, end=end_date, auto_adjust=True, progress=False
         )
@@ -40,7 +43,7 @@ def fetch_historical_data(
         return pd.DataFrame()
 
 
-# ---------------------------- 2. STRATEGY DEFINITIONS ---------------------------- #
+# ---------------------------- STRATEGIES ---------------------------- #
 
 
 def moving_average_crossover(returns: pd.DataFrame, short: int, long: int) -> pd.Series:
@@ -80,7 +83,7 @@ def mean_reversion_zscore(
     return signal
 
 
-# ---------------------------- 3. CORE BACKTEST ENGINE ---------------------------- #
+# ---------------------------- CORE BACKTEST ENGINE ---------------------------- #
 
 
 def evaluate_performance(strat_returns: pd.Series) -> Tuple[float, float, float]:
@@ -116,17 +119,17 @@ def run_backtest(
         params: Dict of parameters for the strategy
         cost_bps: Cost per trade in decimal (0.001 = 10 basis points = 0.1%)
     """
-    # 1. Generate Signal
+    # Generate Signal
     # We pass 'returns' (OHLC) to the strategy
     # Important: The strategy must handle its own parameter casting
     try:
         signal = strategy(returns, **params)
     except TypeError as e:
         # Handle cases where param names don't match exactly
-        print(f"⚠️ Parameter mismatch for {strategy.__name__}: {e}")
+        print(f"Parameter mismatch for {strategy.__name__}: {e}")
         return 0.0, 0.0, pd.Series()
 
-    # 2. Shift Signal to avoid Look-Ahead Bias
+    # Shift Signal to avoid Look-Ahead Bias
     # Signal generated at Close of Day T affects returns of Day T+1
     # We use 'Close-to-Close' returns
     market_returns = np.log(returns["Close"] / returns["Close"].shift(1))
@@ -135,15 +138,15 @@ def run_backtest(
     # We .shift(1) the signal so it aligns with the FUTURE return
     aligned_signal = signal.shift(1)
 
-    # 3. Calculate Gross Returns
+    # Calculate Gross Returns
     strategy_returns = aligned_signal * market_returns
 
-    # 4. Calculate Transaction Costs
+    # Calculate Transaction Costs
     # We pay costs whenever the signal CHANGES (Diff != 0)
     trades = aligned_signal.diff().abs().fillna(0)
     costs = trades * cost_bps
 
-    # 5. Net Returns
+    # Net Returns
     net_returns = strategy_returns - costs
     net_returns = net_returns.dropna()
 
@@ -151,7 +154,7 @@ def run_backtest(
     return pf, sharpe, net_returns
 
 
-# ---------------------------- 4. PERMUTATION LOGIC ---------------------------- #
+# ---------------------------- PERMUTATION LOGIC ---------------------------- #
 
 
 def get_permutation(
@@ -199,11 +202,11 @@ def permutation_test(
     """
     print(f"\n--- Running Permutation Test ({n_permutations} runs) ---")
 
-    # 1. Real Performance
+    # Real Performance
     real_pf, _, _ = run_backtest(returns, strategy, params)
     print(f"Real PF: {real_pf:.2f}")
 
-    # 2. Parallel Randomized Performance
+    # Parallel Randomized Performance
     def single_run(seed):
         perm_data = get_permutation(returns, seed=seed)
         pf, _, _ = run_backtest(perm_data, strategy, params)
@@ -213,7 +216,7 @@ def permutation_test(
         delayed(single_run)(seed) for seed in range(n_permutations)
     )
 
-    # 3. Stats & Plotting
+    # Stats & Plotting
     perm_pfs = np.array(perm_pfs)
     p_value = (np.sum(perm_pfs >= real_pf) + 1) / (n_permutations + 1)
 
@@ -320,7 +323,7 @@ def select_robust_params(
     """
     results = []
 
-    # 1. Scan all parameters
+    # Scan all parameters
     for val in param_range:
         params = {param_name: val}
         _, sharpe, _ = run_backtest(returns, strategy, params, cost_bps)
@@ -328,7 +331,7 @@ def select_robust_params(
 
     df = pd.DataFrame(results)
 
-    # 2. Filter for "Good" parameters (e.g., Top 33% of performance)
+    # Filter for "Good" parameters (e.g., Top 33% of performance)
     # This identifies the "Plateau"
     sharpe_threshold = df["sharpe"].quantile(0.66)
     good_params = df[df["sharpe"] >= sharpe_threshold]
@@ -337,7 +340,7 @@ def select_robust_params(
         print("No stable parameter region found. Defaulting to middle.")
         best_val = param_range[len(param_range) // 2]
     else:
-        # 3. Pick the Median of the good parameters
+        # Pick the Median of the good parameters
         # This puts us in the safest spot—the middle of the hill.
         best_val = int(good_params["val"].median())
 
@@ -358,9 +361,7 @@ def plot_walkforward_timeline(train_periods: List[Tuple], test_periods: List[Tup
     """
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    # For each window, plot a bar for Train and a bar for Test
     for i, (train_rng, test_rng) in enumerate(zip(train_periods, test_periods)):
-        # Train Bar (Blue)
         ax.barh(
             y=i,
             width=(train_rng[1] - train_rng[0]).days,
@@ -369,7 +370,6 @@ def plot_walkforward_timeline(train_periods: List[Tuple], test_periods: List[Tup
             edgecolor="black",
             alpha=0.8,
         )
-        # Test Bar (Orange)
         ax.barh(
             y=i,
             width=(test_rng[1] - test_rng[0]).days,
@@ -379,7 +379,6 @@ def plot_walkforward_timeline(train_periods: List[Tuple], test_periods: List[Tup
             alpha=0.8,
         )
 
-    # Decoration
     ax.set_yticks(range(len(train_periods)))
     ax.set_yticklabels([f"Window {i + 1}" for i in range(len(train_periods))])
     ax.set_xlabel("Date")
@@ -387,7 +386,6 @@ def plot_walkforward_timeline(train_periods: List[Tuple], test_periods: List[Tup
         " Walk-Forward Optimization Process: Training (Blue) vs Testing (Orange)"
     )
 
-    # Format X-axis dates
     ax.xaxis.set_major_locator(mdates.YearLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
@@ -408,9 +406,9 @@ def walkforward_optimization(
     train_years: int = 4,
     test_months: int = 3,
     cost_bps: float = 0.001,
-    enable_benchmark: bool = True,  # Toggle this to True/False
+    enable_benchmark: bool = True,
     benchmark_ticker: str = "SPY",
-    lookback_buffer: int = 200,  # Keeps the "Cold Start" fix
+    lookback_buffer: int = 200,
 ) -> Union[pd.Series, Tuple[pd.Series, pd.Series]]:
     """
     Unified Walk-Forward Optimization Engine.
@@ -420,7 +418,6 @@ def walkforward_optimization(
     - Generates timeline visualization.
     """
 
-    # 1. OPTIONAL: Fetch Benchmark
     bench_ret = pd.Series()
     if enable_benchmark:
         bench_df = fetch_historical_data(
@@ -434,7 +431,6 @@ def walkforward_optimization(
             print("Warning: Benchmark data empty. Proceeding without benchmark.")
             enable_benchmark = False
 
-    # 2. SETUP
     train_size = int(train_years * 252)
     test_size = int(test_months * 21)
     total_len = len(returns)
@@ -442,14 +438,12 @@ def walkforward_optimization(
     wf_returns = []
     wf_bench_returns = []
 
-    # Store dates for visualization
     viz_train_dates = []
     viz_test_dates = []
 
     current_idx = train_size
     print(f"Starting Walk-Forward ({train_years}y train -> {test_months}m test)...")
 
-    # 3. MAIN LOOP
     while current_idx < total_len:
         train_start = current_idx - train_size
         train_end = current_idx
@@ -472,7 +466,7 @@ def walkforward_optimization(
         viz_train_dates.append((train_data.index[0], train_data.index[-1]))
         viz_test_dates.append((test_data_real.index[0], test_data_real.index[-1]))
 
-        # --- A. OPTIMIZATION (In-Sample) ---
+        # In-sample optimisation
         best_sharpe = -np.inf
         best_params = None
         for params in param_grid:
@@ -481,27 +475,25 @@ def walkforward_optimization(
                 best_sharpe = sharpe
                 best_params = params
 
-        # --- B. TEST EXECUTION (Out-of-Sample) ---
-        # Run on warmup data to prime indicators
+        # Out-of-sample
         _, _, full_period_returns = run_backtest(
             test_data_with_warmup, strategy, best_params, cost_bps
         )
 
-        # Slice to keep ONLY the real test window
+        # Slice to keep only the real test window
         period_returns = full_period_returns.reindex(test_data_real.index).fillna(0)
         wf_returns.append(period_returns)
 
-        # --- C. BENCHMARK SLICING ---
+        # Benchmark slicing
         if enable_benchmark:
             period_bench = bench_ret.reindex(test_data_real.index).fillna(0)
             wf_bench_returns.append(period_bench)
 
         current_idx += test_size
 
-    # 4. VISUALIZATION
+    # Visualise
     # plot_walkforward_timeline(viz_train_dates, viz_test_dates)
 
-    # 5. RETURN
     if not wf_returns:
         return (pd.Series(), pd.Series()) if enable_benchmark else pd.Series()
 
@@ -524,13 +516,12 @@ def get_block_bootstrap(
     """
     np.random.seed(seed)
 
-    # 1. Prepare Returns
+    # Prepare Returns
     log_ret = np.log(returns[["Open", "High", "Low", "Close"]]).diff().iloc[1:]
     n_samples = len(log_ret)
 
-    # 2. Create Blocks
+    # Create Blocks
     # We simply chop the data into N blocks
-    # Note: A more advanced version is "Circular Block Bootstrap", but this is sufficient for now.
     n_blocks = int(np.ceil(n_samples / block_size))
 
     blocks = []
@@ -539,12 +530,11 @@ def get_block_bootstrap(
         end = min((i + 1) * block_size, n_samples)
         blocks.append(log_ret.iloc[start:end])
 
-    # 3. Shuffle Blocks
-    # We sample blocks with replacement to create a new history
+    # Shuffle blocks with replacement to create a new history
     random_indices = np.random.randint(0, len(blocks), size=len(blocks))
     shuffled_blocks = [blocks[i] for i in random_indices]
 
-    # 4. Reconstruct Path
+    # Reconstruct Path
     synthetic_returns = pd.concat(shuffled_blocks).reset_index(drop=True)
 
     # Trim to original length if needed
@@ -580,8 +570,7 @@ def synthetic_walkforward_stress_test(
     real_wf_curve = None
     synthetic_curves = []
 
-    # 1. Run Real WFA First (Baseline)
-    # We pass the lookback_buffer here
+    # Run Real WFA First (Baseline)
     real_wf = walkforward_optimization(
         returns,
         strategy,
@@ -593,12 +582,11 @@ def synthetic_walkforward_stress_test(
     if not real_wf.empty:
         real_wf_curve = real_wf.cumsum()
 
-    # 2. Run Synthetic WFAs
+    # Run Synthetic WFAs
     for i in range(n_synthetic_runs):
         print(f"Running Synthetic Path {i + 1}/{n_synthetic_runs}...")
         synth_data = get_block_bootstrap(returns, block_size=63, seed=i)
 
-        # We pass the lookback_buffer here too
         synth_wf = walkforward_optimization(
             synth_data,
             strategy,
@@ -611,7 +599,7 @@ def synthetic_walkforward_stress_test(
         if not synth_wf.empty:
             synthetic_curves.append(synth_wf.cumsum())
 
-    # 3. Plot Spaghetti
+    # Plot Spaghetti
     plt.figure(figsize=(10, 6))
 
     # Plot Synthetic
@@ -637,7 +625,7 @@ def synthetic_walkforward_stress_test(
     plt.show()
 
 
-# ---------------------------- MAIN ---------------------------- #
+# ---------------------------- MAIN EXECUTION BLOCK ---------------------------- #
 
 if __name__ == "__main__":
     plt.style.use("dark_background")
@@ -645,31 +633,24 @@ if __name__ == "__main__":
     COSTS = 0.0005  # 5 bps
     SAFE_BUFFER = 1000
 
-    data = fetch_historical_data(
-        TICKER, start_date="2015-01-01"
-    )  # Changed to 2015 for better crypto data quality
+    data = fetch_historical_data(TICKER, start_date="2015-01-01")
 
     if not data.empty:
-        # Define the Search Space (The "Plateau" you found earlier)
         search_range = range(200, 500, 10)
         param_grid = [{"lookback": i} for i in search_range]
 
-        # --- TEST 0: ROBUST SELECTION ---
+        # Robust selection
         print("\n=== TEST 0: Parameter Stability Analysis ===")
-        # 1. Visualize (for you)
         plot_parameter_sensitivity(
             data, donchian_breakout, "lookback", search_range, COSTS
         )
 
-        # 2. Select (for the machine)
-        # This replaces the hardcoded {"lookback": 50}
         robust_params = select_robust_params(
             data, donchian_breakout, "lookback", search_range, COSTS
         )
 
-        # --- TEST 1: IN-SAMPLE EXCELLENCE ---
+        # In-sample test
         print("\n=== TEST 1: In-Sample Excellence (Baseline) ===")
-        # Uses the robustly selected parameter automatically
         best_pf, best_sharpe, _ = run_backtest(
             data, donchian_breakout, robust_params, COSTS
         )
@@ -677,16 +658,13 @@ if __name__ == "__main__":
             f"Baseline Result ({robust_params}) -> PF: {best_pf:.2f} | Sharpe: {best_sharpe:.2f}"
         )
 
-        # --- TEST 2: PERMUTATION (DATA MINING BIAS) ---
+        # Permutation
         print("\n=== TEST 2: Permutation Test (Checking for Luck) ===")
-        # Visualize synthetic worlds
         plot_synthetic_paths(data, n_paths=15)
 
-        # Run test using the ROBUST parameter
         permutation_test(data, donchian_breakout, robust_params, n_permutations=1000)
 
-        # --- TEST 3: SYNTHETIC WALK-FORWARD STRESS TEST ---
-        # This uses the full grid, so it does its own optimization
+        # Synthetic WF test
         synthetic_walkforward_stress_test(
             data,
             donchian_breakout,
@@ -696,7 +674,7 @@ if __name__ == "__main__":
             lookback_buffer=SAFE_BUFFER,
         )
 
-        # # --- TEST 3: WALK-FORWARD ANALYSIS (ROBUSTNESS) ---
+        # # WF analysis
         # print("\n=== TEST 3: Walk-Forward Analysis (Realistic Simulation) ===")
         # # Returns just one Series
         # wf_results = walkforward_optimization(

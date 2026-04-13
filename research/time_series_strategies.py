@@ -1,12 +1,13 @@
+# ---------------------------- IMPORTS ---------------------------- #
+
+
 import pandas as pd
 import numpy as np
 from typing import Dict, Any
 from abc import ABC, abstractmethod
 
 
-# ============================================================
-# 1. BASE STRATEGY CLASS
-# ============================================================
+# ---------------------------- BASE STRATEGY CLASS ---------------------------- #
 
 
 class Strategy(ABC):
@@ -23,6 +24,9 @@ class Strategy(ABC):
     @abstractmethod
     def name(self) -> str:
         pass
+
+
+# ---------------------------- STRATEGIES ---------------------------- #
 
 
 class DonchianBreakout(Strategy):

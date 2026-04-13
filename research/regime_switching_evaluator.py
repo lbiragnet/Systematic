@@ -1,3 +1,6 @@
+# ---------------------------- IMPORTS ---------------------------- #
+
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,9 +18,7 @@ from evaluator_base import (
 from time_series_strategies import Strategy, DonchianBreakout
 
 
-# ============================================================
-# REGIME SWITCHING
-# ============================================================
+# ---------------------------- REGIME SWITCHING ---------------------------- #
 
 
 class RegimeSwitchingEvaluator(Evaluator):
@@ -126,7 +127,7 @@ class RegimeSwitchingEvaluator(Evaluator):
         synth_rets = []
         synth_states = []  # Keep track of states to know the vol for H/L generation
 
-        # 1. Generate Returns Loop
+        # Generate Returns Loop
         for _ in range(length):
             current_state = np.random.choice([0, 1], p=trans_mat[current_state])
             synth_states.append(current_state)
@@ -141,14 +142,14 @@ class RegimeSwitchingEvaluator(Evaluator):
 
             synth_rets.append(r)
 
-        # 2. Reconstruct Price Path (The "Close")
+        # Reconstruct Price Path (The "Close")
         cum_ret = np.array(synth_rets).cumsum()
         close_path = start_price * np.exp(cum_ret)
 
         # Create Dates
         dates = pd.date_range(start="2050-01-01", periods=length, freq="D")
 
-        # 3. Construct OHLC
+        # Construct OHLC
         if not self.realistic_ohlc:
             # Simple Mode: O=H=L=C
             return pd.DataFrame(
@@ -233,9 +234,7 @@ class RegimeSwitchingEvaluator(Evaluator):
         plt.show()
 
 
-# ============================================================
-# MAIN EXECUTION
-# ============================================================
+# ---------------------------- MAIN EXECUTION BLOCK ---------------------------- #
 
 
 if __name__ == "__main__":

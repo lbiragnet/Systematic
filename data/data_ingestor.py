@@ -16,15 +16,12 @@ from backup_manager import perform_backup
 
 # -------------------- CONFIG --------------------
 
-# Database file
 STOCKS_DB_NAME = "historical_stock_data.db"
 
-# Fetch API keys
 load_api_keys()
 MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")
 EOD_API_KEY = os.getenv("EOD_API_KEY")
 
-# Create client
 client = RESTClient(api_key=MASSIVE_API_KEY)
 
 
@@ -117,7 +114,7 @@ def update_database_massiveapi(tickers_list):
     conn = sqlite3.connect(STOCKS_DB_NAME)
 
     for i, ticker in enumerate(tickers_list):
-        # 1. Find out when we last updated this specific ticker
+        # Find out when we last updated this specific ticker
         existing_date = pd.read_sql(
             f"SELECT MAX(timestamp) as last_date FROM daily_prices WHERE ticker='{ticker}'",
             conn,
@@ -126,18 +123,16 @@ def update_database_massiveapi(tickers_list):
         yesterday = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
         if last_date:
             # If we have data, start from the next day
-            # The database stores full timestamps (YYYY-MM-DD 00:00:00)
             last_dt_obj = pd.to_datetime(last_date)
             start_date = (last_dt_obj + timedelta(days=1)).strftime("%Y-%m-%d")
         else:
-            # Massive API has a 2 year max lookback for free tier
             start_date = "2020-01-01"
 
         if start_date > yesterday:
             print(f"{ticker} is already up to date (Data available up to {last_date}).")
             continue
 
-        # 2. Fetch new data - use yesterday instead of today
+        # Fetch new data - use yesterday instead of today
         try:
             new_data = get_aggregate_bars_massiveapi(ticker, start_date, yesterday)
 
@@ -151,9 +146,9 @@ def update_database_massiveapi(tickers_list):
 
         except Exception as e:
             # Catch "Plan doesn't include this timeframe" or other API errors
-            print(f"⚠ Error updating {ticker}: {e}")
+            print(f"Error updating {ticker}: {e}")
 
-        # Respect rate limits
+        # Rate limits
         if i != len(tickers) - 1:
             time.sleep(15)
 
@@ -161,18 +156,18 @@ def update_database_massiveapi(tickers_list):
     print("Update routine finished.")
 
 
-# -------------------- RUN THE UPDATE --------------------
+# -------------------- MAIN EXECUTION BLOCK --------------------
 
 if __name__ == "__main__":
     with open("stocks_list.txt") as f:
         tickers = f.read().splitlines()
 
-    # 1. Initialise database
+    # Initialise database
     init_db()
 
-    # 2. Run the update
+    # Run the update
     update_database_massiveapi(tickers)
 
-    # 3. Trigger backup after update is done
+    # Trigger backup after update is done
     print("\n --- Starting Backup ---")
     perform_backup(db_name=STOCKS_DB_NAME, max_backups=10)

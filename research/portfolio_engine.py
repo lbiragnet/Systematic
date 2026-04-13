@@ -1,9 +1,15 @@
+# ---------------------------- IMPORTS ---------------------------- #
+
+
 import pandas as pd
 import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
 from typing import List
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
+
+
+# ---------------------------- DATA LOADING ---------------------------- #
 
 
 class PortfolioDataLoader:
@@ -35,8 +41,11 @@ class PortfolioDataLoader:
         # Drop rows where ANY asset is missing (Wait until all assets start trading)
         prices = prices.dropna()
 
-        print(f"✅ Universe Ready: {prices.shape[0]} days x {prices.shape[1]} assets")
+        print(f"Universe Ready: {prices.shape[0]} days x {prices.shape[1]} assets")
         return prices
+
+
+# ---------------------------- BACKTESTING ---------------------------- #
 
 
 class PortfolioBacktester:
@@ -96,11 +105,11 @@ class PortfolioBacktester:
             is_volatile = aligned_regime.values == 1
 
         for t in range(lookback_days, len(self.prices)):
-            # A. Calculate P&L from yesterday's holdings
+            # Calculate P&L from yesterday's holdings
             day_ret = np.dot(weights, asset_ret_values[t])
             daily_returns.append(day_ret)
 
-            # B. Rebalance Logic
+            # Rebalance Logic
             if is_rebalance_day[t]:
                 # Enforce a break if regime is highly volatile
                 if regime_signal is not None and is_volatile[t]:
@@ -121,23 +130,21 @@ class PortfolioBacktester:
                         # Pick Top N
                         top_indices = sorted_valid_idx[-top_n:]
 
-                        # C. Set New Weights (Equal Weight)
+                        # Set New Weights (Equal Weight)
                         weights = np.zeros(n_assets)
                         weights[top_indices] = 1.0 / top_n
                     else:
                         # Cash fallback if not enough data
                         weights = np.zeros(n_assets)
 
-        # 4. Compile Results
+        # Compile Results
         dates = self.prices.index[lookback_days:]
         equity_curve = pd.Series(daily_returns, index=dates).cumsum()
 
         return equity_curve, weights  # Returns final weights for inspection
 
 
-# ==========================================
-# MAIN EXECUTION (PORTFOLIO)
-# ==========================================
+# ---------------------------- MAIN EXECUTION BLOCK ---------------------------- #
 
 
 def get_regime_signal(prices: pd.DataFrame, trend_window: int = 200):
@@ -148,10 +155,10 @@ def get_regime_signal(prices: pd.DataFrame, trend_window: int = 200):
       AND
       2. Market is in a Downtrend (Price < 200 SMA)
     """
-    # 1. Create Benchmark
+    # Create Benchmark
     benchmark = prices.mean(axis=1)
 
-    # 2. Fit HMM (The Volatility Sensor)
+    # Fit HMM (The Volatility Sensor)
     returns = 100 * np.log(benchmark / benchmark.shift(1)).dropna()
     print("Training Regime Filter (HMM)...")
     model = MarkovRegression(returns, k_regimes=2, trend="c", switching_variance=True)
@@ -165,18 +172,13 @@ def get_regime_signal(prices: pd.DataFrame, trend_window: int = 200):
 
     # HMM Signal: 1 if Volatile, 0 if Calm
     hmm_signal = (prob_volatile > 0.5).astype(int)
-
-    # --- THE FIX IS HERE ---
-    # reindex() converts to float due to NaNs.
-    # fillna(0) fills them, but we must explicitly cast back to .astype(int)
     hmm_signal = hmm_signal.reindex(prices.index).fillna(0).astype(int)
 
-    # 3. Trend Sensor (The Direction Filter)
+    # Trend Sensor (The Direction Filter)
     ma_trend = benchmark.rolling(window=trend_window).mean()
     is_downtrend = (benchmark < ma_trend).astype(int)
 
-    # 4. Composite Signal
-    # Now both sides are integers, so '&' will work perfectly
+    # Composite Signal
     final_signal = hmm_signal & is_downtrend
 
     return final_signal
@@ -204,12 +206,11 @@ if __name__ == "__main__":
 
         # Create a column of 1.0s (or a slow upward drift for interest rates)
         # For simplicity, we assume Risk-Free Rate is 0% (Flat line)
-        # Ideally, fetch 'SHV' (Short Treasury ETF) instead, but this works for simulation.
         prices["CASH"] = 1.0
 
         # NOTE: We must ensure CASH doesn't break pct_change (0/0).
         # So we give it a tiny drift or just use a stable ETF like 'SHV' in the real universe.
-        # Better yet: Let's fetch 'SHV' (Short-term Treasuries) as the cash proxy.
+        # Better yet: fetch 'SHV' (Short-term Treasuries) as the cash proxy.
 
         # REDO UNIVERSE WITH CASH PROXY
         universe_with_cash = ["XLK", "XLE", "XLF", "TLT", "GLD", "BTC-USD", "SHV"]
@@ -223,7 +224,6 @@ if __name__ == "__main__":
             lookback_days=126, top_n=2, rebalance_freq="ME", regime_signal=None
         )
 
-        # Plot
         plt.figure(figsize=(12, 6))
         plt.plot(
             equity_natural_cash,
@@ -245,6 +245,3 @@ if __name__ == "__main__":
         plt.legend()
         plt.grid(color="gray", alpha=0.3, linewidth=0.5)
         plt.show()
-
-        # Check if it picked Cash in 2022
-        # We can look at the 'weights' dataframe or just inspect the curve.

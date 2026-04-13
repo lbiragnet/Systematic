@@ -9,18 +9,18 @@ def perform_backup(db_name, backup_folder="data/backups", max_backups=7):
     Safely backs up the SQLite database and rotates old files.
     """
 
-    # 1. Create backup directory if it doesn't exist
+    # Create backup directory if it doesn't exist
     if not os.path.exists(backup_folder):
         os.makedirs(backup_folder)
         print(f"Created backup directory: {backup_folder}")
 
-    # 2. Generate a timestamped filename
+    # Generate a timestamped filename
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     backup_filename = f"{os.path.splitext(db_name)[0]}_{timestamp}.db"
     backup_path = os.path.join(backup_folder, backup_filename)
 
     try:
-        # 3. Perform the backup
+        # Backup
         source_conn = sqlite3.connect(db_name)
         dest_conn = sqlite3.connect(backup_path)
         source_conn.backup(dest_conn)
@@ -28,7 +28,7 @@ def perform_backup(db_name, backup_folder="data/backups", max_backups=7):
         dest_conn.close()
         source_conn.close()
 
-        # 4. Cleanup / rotation (delete old backups)
+        # Cleanup / rotation (delete old backups)
         _rotate_backups(db_name, backup_folder, max_backups)
 
     except Exception as e:

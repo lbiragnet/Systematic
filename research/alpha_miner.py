@@ -1,14 +1,19 @@
+# -------------------- IMPORTS --------------------
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-
-# Import your existing data loader
 from portfolio_engine import PortfolioDataLoader
+import itertools
+import warnings
+
+
+# -------------------- ALPHA PIPELINE --------------------
 
 
 class AlphaMiner:
     """
-    An automated pipeline to generate mathematical features and evaluate
+    Automated pipeline to generate mathematical features and evaluate
     their predictive power using the Information Coefficient (IC).
     """
 
@@ -37,7 +42,7 @@ class AlphaMiner:
         features["vol_5d"] = -self.returns.rolling(20).std()
         features["vol_20d"] = -self.returns.rolling(20).std()
 
-        # Acceleration (Is momentum speeding up or slowing down?)
+        # Acceleration
         features["acceleration_1m_3m"] = features["mom_1m"] - features["mom_3m"]
 
         return features
@@ -123,7 +128,7 @@ class AlphaMiner:
 
             factor_df = features_dict[name]
 
-            # 1. Cross-Sectional Z-Score (Normalize each day across all assets)
+            # Cross-Sectional Z-Score (Normalize each day across all assets)
             # Subtract the daily mean, divide by the daily standard deviation
             daily_mean = factor_df.mean(axis=1)
             daily_std = factor_df.std(axis=1)
@@ -133,11 +138,11 @@ class AlphaMiner:
 
             z_scored_factor = factor_df.sub(daily_mean, axis=0).div(daily_std, axis=0)
 
-            # 2. Apply direction and weight
+            # Apply direction and weight
             # If weight is -1.0, we invert the Z-score so higher remains "BUY"
             weighted_factor = z_scored_factor * weight
 
-            # 3. Add to the master score
+            # Add to the master score
             combined_score = combined_score.add(weighted_factor, fill_value=0.0)
 
         return combined_score
@@ -148,8 +153,6 @@ class AlphaMiner:
         """
         Runs a Grid Search to find the optimal weight combination for a list of factors.
         """
-        import itertools
-        import warnings  # <-- NEW: Import warnings
 
         print(f"\nRunning Grid Search Optimization for: {factors_to_combine}")
 
@@ -162,8 +165,7 @@ class AlphaMiner:
 
         results = []
 
-        # --- THE FIX: Identify valid rows for the TARGET once, outside the loop ---
-        # We use > 1e-6 to avoid floating point math errors
+        # Use > 1e-6 to avoid floating point math errors
         valid_targets = target_returns.std(axis=1) > 1e-6
 
         # We temporarily mute the Scipy warnings just for this calculation block
@@ -179,14 +181,12 @@ class AlphaMiner:
                     features_dict, weights_and_directions, verbose=False
                 )
 
-                # --- THE FIX: Combine both valid masks ---
                 valid_factors = combined_score.std(axis=1) > 1e-6
                 valid_rows = valid_factors & valid_targets
 
                 clean_score = combined_score[valid_rows]
                 clean_targets = target_returns[valid_rows]
 
-                # Evaluate it
                 daily_ic = clean_score.corrwith(
                     clean_targets, axis=1, method="spearman"
                 ).dropna()
@@ -220,25 +220,25 @@ class AlphaMiner:
         """
         print("   -> Neutralizing factor against sector bias...")
 
-        # 1. Melt the 2D matrix into a 1D list so we can group it easily
+        # Melt the 2D matrix into a 1D list so we can group it easily
         stacked = factor_df.stack().reset_index()
         stacked.columns = ["Date", "Ticker", "Value"]
 
-        # 2. Attach the sector labels
+        # Attach the sector labels
         stacked["Sector"] = stacked["Ticker"].map(sector_mapping)
 
-        # 3. Define the internal Z-score math
+        # Define the internal Z-score math
         def intra_sector_zscore(x):
             if x.std() > 1e-6:
                 return (x - x.mean()) / x.std()
             return x - x.mean()  # Return 0 if no variance
 
-        # 4. Group by exactly Date AND Sector, then apply the math
+        # Group by exactly Date AND Sector, then apply the math
         stacked["Neutral_Value"] = stacked.groupby(["Date", "Sector"])[
             "Value"
         ].transform(intra_sector_zscore)
 
-        # 5. Pivot back into our standard 2D matrix format
+        # Pivot back into our standard 2D matrix format
         neutral_df = stacked.pivot(
             index="Date", columns="Ticker", values="Neutral_Value"
         )
@@ -271,6 +271,9 @@ class AlphaMiner:
             combined_score = combined_score.add(weighted_factor, fill_value=0.0)
 
         return combined_score
+
+
+# -------------------- MAIN EXECUTION BLOCK --------------------
 
 
 if __name__ == "__main__":
@@ -401,7 +404,7 @@ if __name__ == "__main__":
         #     print(f"Processing {factor_name}...")
         #     neutral_features[factor_name] = miner.neutralize_factor(raw_df, sector_map)
 
-        # # 3. Run the Grid Search on the clean, neutralized data
+        # # Run the Grid Search on the clean, neutralized data
         # factors_to_test = ["mom_6m", "vol_20d"]
         # optimization_results = miner.optimize_combo_weights(
         #     neutral_features, factors_to_test, forward_horizon=5
@@ -413,7 +416,7 @@ if __name__ == "__main__":
             features, factors_to_test, forward_horizon=5
         )
 
-        print("\n🏆 OPTIMIZATION LEADERBOARD (Sorted by IR) 🏆")
+        print("\nOPTIMIZATION LEADERBOARD (Sorted by IR)")
         print("=" * 80)
         print(
             optimization_results.head(10).to_string(
@@ -422,10 +425,6 @@ if __name__ == "__main__":
         )
         print("=" * 80)
 
-
-# ==========================================
-# MAIN EXECUTION
-# ==========================================
 
 # if __name__ == "__main__":
 #     plt.style.use("dark_background")
@@ -442,7 +441,7 @@ if __name__ == "__main__":
 #         # Test which factors predict the NEXT 5 DAYS of returns
 #         leaderboard = miner.evaluate_alphas(forward_horizon=5)
 
-#         print("\n🏆 ALPHA LEADERBOARD 🏆")
+#         print("\nALPHA LEADERBOARD")
 #         print("=" * 60)
 #         # Format the DataFrame for clean printing
 #         print(leaderboard.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
@@ -562,7 +561,7 @@ if __name__ == "__main__":
 #         # 5. Evaluate everything together
 #         leaderboard = miner.evaluate_alphas(forward_horizon=5)
 
-#         print("\n🏆 ALPHA LEADERBOARD 🏆")
+#         print("\nALPHA LEADERBOARD")
 #         print("=" * 60)
 #         print(leaderboard.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 #         print("=" * 60)
